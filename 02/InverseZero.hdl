@@ -1,0 +1,9 @@
+CHIP InverseZero {
+    IN in[16], z, n;
+    OUT out[16];
+
+    PARTS:
+    Mux16(a=in, b=false, sel=z, out=tmp);
+    Not16(in=tmp, out=inversed);
+    Mux16(a=tmp, b=inversed, sel=n, out=out);
+}
