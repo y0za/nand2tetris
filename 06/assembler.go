@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -25,8 +27,13 @@ func main() {
 		return
 	}
 
-	sc := bufio.NewScanner(asm)
-	code, err := assemble(sc)
+	asmCode, err := ioutil.ReadAll(asm)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to read file %v", err)
+		return
+	}
+
+	code, err := assemble(asmCode)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to assemble %v", err)
 		return
@@ -43,11 +50,50 @@ func main() {
 	hack.Write(code)
 }
 
-func assemble(sc *bufio.Scanner) ([]byte, error) {
-	var buf bytes.Buffer
+func assemble(asmCode []byte) ([]byte, error) {
 	var err error
 
+	sc := bufio.NewScanner(bytes.NewReader(asmCode))
+	st := NewSymbolTable()
+
+	err = preProcess(sc, st)
+	if err != nil {
+		return nil, err
+	}
+
+	sc = bufio.NewScanner(bytes.NewReader(asmCode))
+	return buildProcess(sc, st)
+}
+
+func preProcess(sc *bufio.Scanner, st *SymbolTable) error {
+	var err error
 	parser := NewParser(sc)
+	n := 0
+
+	for parser.HasMoreCommands() {
+		err = parser.Advance()
+		if err != nil {
+			return err
+		}
+
+		switch parser.CommandType() {
+		case CCommand, ACommand:
+			n += 1
+		case LCommand:
+			symbol := parser.Symbol()
+			st.AddEntry(symbol, n)
+		}
+	}
+
+	return nil
+}
+
+func buildProcess(sc *bufio.Scanner, st *SymbolTable) ([]byte, error) {
+	var buf bytes.Buffer
+	var err error
+	parser := NewParser(sc)
+	na := 16
+
 	for parser.HasMoreCommands() {
 		err = parser.Advance()
 		if err != nil {
@@ -60,6 +106,19 @@ func assemble(sc *bufio.Scanner) ([]byte, error) {
 			dest := destCode(parser.Dest())
 			jump := jumpCode(parser.Jump())
 			line := fmt.Sprintf("111%s%s%s\n", comp, dest, jump)
+			buf.WriteString(line)
+		case ACommand:
+			symbol := parser.Symbol()
+			i, err := strconv.Atoi(symbol)
+			address := i
+			if err != nil {
+				if !st.Contains(symbol) {
+					st.AddEntry(symbol, na)
+					na += 1
+				}
+				address = st.GetAddress(symbol)
+			}
+			line := fmt.Sprintf("0%015b\n", address)
 			buf.WriteString(line)
 		}
 	}
